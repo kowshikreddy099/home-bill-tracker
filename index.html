@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Home Bill Tracker</title>
+<meta name="description" content="Track household bills and predict next month's amounts with machine learning that runs in your browser.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: summary strip (this month vs ML estimate), stacked breakdown bar, grid of bill cards with history charts, then a data panel. */
+:root {
+  --bg: #eef2f1;
+  --surface: #ffffff;
+  --ink: #17221f;
+  --muted: #5a6865;
+  --line: #d6dedb;
+  --accent: #0b6e66;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcefec;
+  --good: #1f7a3d;
+  --warn: #a35a00;
+  --bad: #b3261e;
+  --s1: #0b6e66; --s2: #c27a1a; --s3: #3b5fb0; --s4: #b0446b; --s5: #6a8a2a; --s6: #7a5ab0;
+  --font-body: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1716; --surface: #18221f; --ink: #e6efec; --muted: #94a5a1; --line: #2b3a36;
+    --accent: #4cc2b6; --accent-ink: #062320; --accent-soft: #17332f;
+    --good: #6fd08d; --warn: #e6a64a; --bad: #ff8a80;
+    --s1: #4cc2b6; --s2: #e6a64a; --s3: #7f9ee6; --s4: #e57fa3; --s5: #a5c75a; --s6: #b69be6;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 24px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+header { display: flex; flex-direction: column; gap: 4px; }
+h1 { font-size: clamp(1.6rem, 4vw, 2.1rem); line-height: 1.15; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: 1.05rem; margin: 0; }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 64ch; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+input, select, button, textarea { font: inherit; color: inherit; }
+input[type=text], input[type=number], textarea {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; width: 100%; min-width: 0;
+}
+input[type=number] { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+textarea { font-family: var(--font-num); font-size: 13px; line-height: 1.45; min-height: 190px; resize: vertical; white-space: pre; overflow: auto; }
+input:focus-visible, button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.sum { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sum.next { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.sum.next .eyebrow, .sum.next .note { color: inherit; opacity: 0.88; }
+.big { font-family: var(--font-num); font-size: clamp(1.8rem, 5vw, 2.4rem); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.note { color: var(--muted); font-size: 13px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--line); }
+.bar span { display: block; height: 100%; min-width: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+.legend b { color: var(--ink); font-family: var(--font-num); font-weight: 500; font-variant-numeric: tabular-nums; }
+.btn { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 9px 14px; font-weight: 600; cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card-head { display: flex; gap: 8px; align-items: center; }
+.card-head h3 { margin: 0; font-size: 16px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.x { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 6px; width: 30px; height: 30px; cursor: pointer; flex: none; }
+.x:hover { color: var(--bad); border-color: var(--bad); }
+svg.chart { width: 100%; height: auto; display: block; }
+.cap { font-size: 12px; color: var(--muted); margin-top: -6px; }
+.result { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
+.result .v { font-family: var(--font-num); font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.delta { font-family: var(--font-num); font-size: 12px; font-variant-numeric: tabular-nums; }
+.model { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; color: var(--muted); }
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--accent-soft); color: var(--accent); }
+.pill.ex { background: transparent; border: 1px solid var(--warn); color: var(--warn); }
+details { font-size: 13px; color: var(--muted); }
+summary { cursor: pointer; }
+.cmp { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.cmp li { display: flex; justify-content: space-between; gap: 10px; }
+.cmp li.best { color: var(--ink); font-weight: 600; }
+.cmp .m { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.addrow { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; align-items: end; }
+.msg { font-size: 13px; min-height: 1.4em; }
+.msg.err { color: var(--bad); }
+.msg.ok { color: var(--good); }
+.empty { text-align: center; color: var(--muted); padding: 28px 12px; border: 1px dashed var(--line); border-radius: 12px; }
+.fineprint { color: var(--muted); font-size: 13px; }
+.fineprint a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow" id="period"></div>
+    <h1>Home Bill Tracker</h1>
+    <p class="sub">Compares four machine learning models on your past bills and predicts next month for each one. It all runs in your browser. <span class="pill ex" id="exTag" hidden>Example data</span></p>
+  </header>
+
+  <section class="summary" aria-label="Totals">
+    <div class="sum">
+      <div class="eyebrow" id="curLabel">This month</div>
+      <div class="big" id="curTotal">₹0.00</div>
+      <div class="note" id="curNote"></div>
+    </div>
+    <div class="sum next">
+      <div class="eyebrow" id="nextLabel">Next month, ML estimate</div>
+      <div class="big" id="nextTotal">₹0.00</div>
+      <div class="note" id="nextNote"></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Breakdown of this month's bills">
+    <div class="eyebrow">Where this month's money goes</div>
+    <div class="bar" id="bar"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="grid" id="items" aria-label="Bills"></section>
+
+  <section class="panel" aria-labelledby="addTitle">
+    <h2 id="addTitle">Add a month</h2>
+    <p class="note" style="margin:0" id="addHelp"></p>
+    <div class="addrow" id="addrow"></div>
+    <div class="btns"><button class="btn" id="addMonth" type="button">Add month and re-predict</button></div>
+  </section>
+
+  <section class="panel" aria-labelledby="dataTitle">
+    <h2 id="dataTitle">Your bill history</h2>
+    <p class="note" style="margin:0">One row per month, oldest first, no gaps. First column is <b>month</b> as YYYY-MM, then one column per bill in rupees. Paste your own table here, or the contents of <b>ml/bills.csv</b>. You need 16 or more months for the ML models.</p>
+    <label class="f" for="csv">Monthly bills (CSV)<textarea id="csv" spellcheck="false" autocomplete="off"></textarea></label>
+    <div class="btns">
+      <button class="btn" id="apply" type="button">Apply and re-predict</button>
+      <button class="btn ghost" id="reset" type="button">Reset to examples</button>
+    </div>
+    <div class="msg" id="msg" role="status" aria-live="polite"></div>
+  </section>
+
+  <p class="fineprint">The models are Repeat last month, 3-month average, Ridge regression and Boosted trees. Each is tested by training on earlier months and predicting the next one, and the model with the smallest average error predicts next month. Data stays in this browser. Built by Venkata Kowshik Reddy Dadani · <a href="https://github.com/kowshikreddy099" target="_blank" rel="noopener">GitHub</a></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var KEY = 'homebills.ml.v1';
+  var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var COLORS = ['var(--s1)','var(--s2)','var(--s3)','var(--s4)','var(--s5)','var(--s6)'];
+  var NAMES = { naive: 'Repeat last month', ma3: '3-month average', ridge: 'Ridge regression', boost: 'Boosted trees' };
+  var MIN_ROWS = 12;
+
+  /* ---------- month helpers ---------- */
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function ym(y, m) { return y + '-' + pad(m + 1); }
+  function parseYM(s) { var p = s.split('-'); return { y: +p[0], m: +p[1] - 1 }; }
+  function addMonths(s, k) { var p = parseYM(s), t = p.y * 12 + p.m + k; return ym(Math.floor(t / 12), ((t % 12) + 12) % 12); }
+  function longLabel(s) { var p = parseYM(s); return MONTHS[p.m] + ' ' + p.y; }
+  function shortLabel(s) { return MONTHS[parseYM(s).m].slice(0, 3); }
+  function r2(n) { return Math.round(n * 100) / 100; }
+  function mean(a) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i]; return a.length ? s / a.length : 0; }
+  function fmt(n) { return '₹' + (n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  /* ---------- example data (24 months ending this month) ---------- */
+  function rng(seed) { var s = seed >>> 0; return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
+  function gauss(r) { var u = 0, v = 0; while (!u) u = r(); while (!v) v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+  function slab(u) { return 50 + Math.min(u, 100) * 3.5 + Math.max(0, Math.min(u, 200) - 100) * 5 + Math.max(0, u - 200) * 7.5; }
+  function seedData() {
+    var now = new Date(), end = ym(now.getFullYear(), now.getMonth()), r = rng(42);
+    var months = [], rent = [], elec = [], water = [], net = [], stream = [];
+    for (var i = 0; i < 24; i++) {
+      var m = addMonths(end, i - 23), mo = parseYM(m).m;
+      var season = Math.cos((mo - 4) / 12 * 2 * Math.PI);
+      var eu = 190 + 60 * season + gauss(r) * 12 + i * 0.8;
+      var wu = 13 + 2 * season + gauss(r) * 0.8;
+      months.push(m);
+      rent.push(i < 12 ? 18000 : 19000);
+      elec.push(r2(slab(eu)));
+      water.push(r2(80 + wu * 12));
+      net.push(i < 8 ? 799 : 899);
+      stream.push(i < 14 ? 499 : 649);
+    }
+    return { example: true, months: months, bills: [
+      { name: 'Rent', values: rent }, { name: 'Electricity', values: elec }, { name: 'Water', values: water },
+      { name: 'Internet', values: net }, { name: 'Streaming', values: stream } ] };
+  }
+
+  /* ---------- machine learning ---------- */
+  function featRow(y, mo, t) {
+    var l1 = y[t - 1], l2 = y[t - 2], l3 = y[t - 3];
+    return [l1, l2, l3, (l1 + l2 + l3) / 3, t, Math.sin(2 * Math.PI * (mo + 1) / 12), Math.cos(2 * Math.PI * (mo + 1) / 12)];
+  }
+  function solve(A, b) {
+    var n = b.length, i, j, k;
+    for (i = 0; i < n; i++) {
+      var p = i;
+      for (j = i + 1; j < n; j++) if (Math.abs(A[j][i]) > Math.abs(A[p][i])) p = j;
+      var tr = A[i]; A[i] = A[p]; A[p] = tr;
+      var tb = b[i]; b[i] = b[p]; b[p] = tb;
+      var piv = A[i][i] || 1e-12;
+      for (j = i + 1; j < n; j++) {
+        var f = A[j][i] / piv;
+        for (k = i; k < n; k++) A[j][k] -= f * A[i][k];
+        b[j] -= f * b[i];
+      }
+    }
+    var x = new Array(n);
+    for (i = n - 1; i >= 0; i--) {
+      var s = b[i];
+      for (j = i + 1; j < n; j++) s -= A[i][j] * x[j];
+      x[i] = s / (A[i][i] || 1e-12);
+    }
+    return x;
+  }
+  function fitRidge(X, Y, lambda) {
+    var n = X.length, d = X[0].length, mu = [], sd = [], i, j, a, b;
+    for (j = 0; j < d; j++) {
+      var c = []; for (i = 0; i < n; i++) c.push(X[i][j]);
+      mu[j] = mean(c);
+      var v = 0; for (i = 0; i < n; i++) v += (c[i] - mu[j]) * (c[i] - mu[j]);
+      sd[j] = Math.sqrt(v / n) || 1;
+    }
+    var ymu = mean(Y), Z = [];
+    for (i = 0; i < n; i++) { var row = []; for (j = 0; j < d; j++) row.push((X[i][j] - mu[j]) / sd[j]); Z.push(row); }
+    var A = [], rhs = [];
+    for (a = 0; a < d; a++) {
+      A.push([]); var s = 0;
+      for (b = 0; b < d; b++) { var t = 0; for (i = 0; i < n; i++) t += Z[i][a] * Z[i][b]; A[a].push(t + (a === b ? lambda : 0)); }
+      for (i = 0; i < n; i++) s += Z[i][a] * (Y[i] - ymu);
+      rhs.push(s);
+    }
+    var w = solve(A, rhs);
+    return function (x) { var s = ymu; for (var q = 0; q < d; q++) s += w[q] * ((x[q] - mu[q]) / sd[q]); return s; };
+  }
+  function fitBoost(X, Y, rounds, lr) {
+    var n = X.length, d = X[0].length, base = mean(Y), pred = [], res = [], stumps = [], orders = [], i, j;
+    for (j = 0; j < d; j++) {
+      var idx = []; for (i = 0; i < n; i++) idx.push(i);
+      idx.sort(function (a, b) { return X[a][j] - X[b][j]; });
+      orders.push(idx);
+    }
+    for (i = 0; i < n; i++) pred.push(base);
+    for (var r = 0; r < rounds; r++) {
+      var tot = 0;
+      for (i = 0; i < n; i++) { res[i] = Y[i] - pred[i]; tot += res[i]; }
+      var best = null;
+      for (j = 0; j < d; j++) {
+        var o = orders[j], sl = 0;
+        for (var k = 0; k < n - 1; k++) {
+          sl += res[o[k]];
+          var a = X[o[k]][j], b = X[o[k + 1]][j];
+          if (a === b) continue;
+          var nl = k + 1, nr = n - nl, sr = tot - sl, gain = sl * sl / nl + sr * sr / nr;
+          if (!best || gain > best.gain) best = { gain: gain, j: j, thr: (a + b) / 2, lv: sl / nl, rv: sr / nr };
+        }
+      }
+      if (!best) break;
+      stumps.push(best);
+      for (i = 0; i < n; i++) pred[i] += lr * (X[i][best.j] <= best.thr ? best.lv : best.rv);
+    }
+    return function (x) {
+      var s = base;
+      for (var q = 0; q < stumps.length; q++) { var st = stumps[q]; s += lr * (x[st.j] <= st.thr ? st.lv : st.rv); }
+      return s;
+    };
+  }
+  function predictWith(id, y, mos, t) {
+    if (id === 'naive') return y[t - 1];
+    if (id === 'ma3') return (y[t - 1] + y[t - 2] + y[t - 3]) / 3;
+    var X = [], Y = [];
+    for (var s = 3; s < t; s++) { X.push(featRow(y, mos[s], s)); Y.push(y[s]); }
+    var model = id === 'ridge' ? fitRidge(X, Y, 1) : fitBoost(X, Y, 60, 0.2);
+    return model(featRow(y, mos[t], t));
+  }
+  function analyze(y, mos) {
+    var n = y.length, ids = n >= 3 ? ['naive', 'ma3'] : ['naive'];
+    var full = n >= 3 + MIN_ROWS + 1;
+    if (full) ids = ids.concat(['ridge', 'boost']);
+    var start = full ? 3 + MIN_ROWS : 3, scores = [];
+    ids.forEach(function (id) {
+      var err = 0, cnt = 0;
+      for (var t = start; t < n; t++) { err += Math.abs(predictWith(id, y, mos, t) - y[t]); cnt++; }
+      scores.push({ id: id, name: NAMES[id], mae: cnt ? err / cnt : null });
+    });
+    var best = scores[0];
+    scores.forEach(function (s) { if (s.mae != null && (best.mae == null || s.mae < best.mae)) best = s; });
+    var pred = Math.max(0, predictWith(best.id, y, mos, n));
+    return { pred: r2(pred), best: best, scores: scores, ml: full };
+  }
+
+  /* ---------- state ---------- */
+  var state;
+  try { var raw = localStorage.getItem(KEY); state = raw ? JSON.parse(raw) : null; } catch (e) { state = null; }
+  if (!state || !state.months || !state.bills) state = seedData();
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  var results = [];
+  function compute() {
+    var last = state.months[state.months.length - 1];
+    var nextMo = parseYM(addMonths(last, 1)).m;
+    var mos = state.months.map(function (m) { return parseYM(m).m; }).concat([nextMo]);
+    results = state.bills.map(function (b) { return analyze(b.values, mos); });
+  }
+
+  /* ---------- CSV ---------- */
+  function toCSV() {
+    var lines = ['month,' + state.bills.map(function (b) { return b.name; }).join(',')];
+    state.months.forEach(function (m, i) { lines.push(m + ',' + state.bills.map(function (b) { return b.values[i]; }).join(',')); });
+    return lines.join('\n');
+  }
+  function parseCSV(text) {
+    var lines = text.trim().split(/\r?\n/).filter(function (l) { return l.trim(); });
+    if (lines.length < 2) throw new Error('Add a header row and at least one month of bills.');
+    var head = lines[0].split(',').map(function (s) { return s.trim(); });
+    if (head[0].toLowerCase() !== 'month' || head.length < 2) throw new Error('The first column must be called month, followed by one column per bill.');
+    var names = head.slice(1);
+    names.forEach(function (n) { if (!n) throw new Error('Every bill column needs a name in the header row.'); });
+    var months = [], cols = names.map(function () { return []; });
+    for (var i = 1; i < lines.length; i++) {
+      var cells = lines[i].split(',').map(function (s) { return s.trim(); });
+      if (cells.length !== head.length) throw new Error('Row ' + (i + 1) + ' has ' + cells.length + ' columns but the header has ' + head.length + '.');
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(cells[0])) throw new Error('Row ' + (i + 1) + ': "' + cells[0] + '" is not a month in YYYY-MM format.');
+      if (months.length && addMonths(months[months.length - 1], 1) !== cells[0]) throw new Error('Row ' + (i + 1) + ': ' + cells[0] + ' does not follow ' + months[months.length - 1] + '. List months in order with no gaps.');
+      months.push(cells[0]);
+      for (var j = 1; j < cells.length; j++) {
+        var v = parseFloat(cells[j]);
+        if (!isFinite(v) || v < 0 || cells[j] === '') throw new Error('Row ' + (i + 1) + ', ' + names[j - 1] + ': "' + cells[j] + '" is not a valid amount.');
+        cols[j - 1].push(v);
+      }
+    }
+    return { example: false, months: months, bills: names.map(function (n, j) { return { name: n, values: cols[j] }; }) };
+  }
+
+  /* ---------- rendering ---------- */
+  function chart(values, pred, color) {
+    var W = 300, H = 90, px = 6, py = 10, show = values.slice(-24), m = show.length;
+    var all = show.concat([pred]), lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+    if (hi - lo < 1e-6) hi = lo + 1;
+    var pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+    function X(i) { return px + i * (W - 2 * px) / m; }
+    function Y(v) { return py + (1 - (v - lo) / (hi - lo)) * (H - 2 * py); }
+    var d = '', i;
+    for (i = 0; i < m; i++) d += (i ? ' L ' : 'M ') + X(i).toFixed(1) + ' ' + Y(show[i]).toFixed(1);
+    var area = d + ' L ' + X(m - 1).toFixed(1) + ' ' + (H - 4) + ' L ' + X(0).toFixed(1) + ' ' + (H - 4) + ' Z';
+    var g = [py, H / 2, H - py].map(function (y) { return '<line x1="0" x2="' + W + '" y1="' + y + '" y2="' + y + '" style="stroke:var(--line)" stroke-width="1"/>'; }).join('');
+    return '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Last ' + m + ' months and the estimate for next month">' + g +
+      '<path d="' + area + '" style="fill:' + color + '" fill-opacity="0.13" stroke="none"/>' +
+      '<path d="' + d + '" fill="none" style="stroke:' + color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+      '<line x1="' + X(m - 1).toFixed(1) + '" y1="' + Y(show[m - 1]).toFixed(1) + '" x2="' + X(m).toFixed(1) + '" y2="' + Y(pred).toFixed(1) + '" style="stroke:var(--accent)" stroke-width="2" stroke-dasharray="4 3"/>' +
+      '<circle cx="' + X(m - 1).toFixed(1) + '" cy="' + Y(show[m - 1]).toFixed(1) + '" r="3.5" style="fill:' + color + '"/>' +
+      '<circle cx="' + X(m).toFixed(1) + '" cy="' + Y(pred).toFixed(1) + '" r="4.5" style="fill:var(--surface);stroke:var(--accent)" stroke-width="2.5"/></svg>';
+  }
+
+  var itemsEl = document.getElementById('items');
+
+  function card(b, i) {
+    var res = results[i], color = COLORS[i % COLORS.length];
+    var cur = b.values[b.values.length - 1], d = res.pred - cur;
+    var h = '<article class="card"><div class="card-head"><span class="swatch" style="background:' + color + '"></span><h3>' + esc(b.name) + '</h3>' +
+      '<button class="x" type="button" data-del="' + i + '" aria-label="Remove ' + esc(b.name) + '">×</button></div>';
+    h += chart(b.values, res.pred, color);
+    h += '<div class="cap">Last ' + Math.min(24, b.values.length) + ' months, dashed line is the estimate</div>';
+    h += '<div class="result"><div><div class="eyebrow">' + shortLabel(state.months[state.months.length - 1]) + '</div><div class="v">' + fmt(cur) + '</div></div>' +
+      '<div><div class="eyebrow">' + shortLabel(addMonths(state.months[state.months.length - 1], 1)) + ' estimate</div><div class="v">' + fmt(res.pred) + '</div>' +
+      '<div class="delta" style="color:' + (d > 0.005 ? 'var(--warn)' : d < -0.005 ? 'var(--good)' : 'var(--muted)') + '">' +
+      (Math.abs(d) < 0.005 ? 'no change' : (d > 0 ? '+' : '−') + fmt(Math.abs(d))) + '</div></div></div>';
+    h += '<div class="model"><span class="pill">' + res.best.name + '</span>' +
+      (res.best.mae != null ? '<span>average error ' + fmt(res.best.mae) + '</span>' : '<span>not enough history to test</span>') + '</div>';
+    if (!res.ml) h += '<div class="note">ML models need 16 months of history. Simple methods are used until then.</div>';
+    h += '<details><summary>Compare models</summary><ul class="cmp">' + res.scores.slice().sort(function (a, b) {
+      return (a.mae == null ? 1e18 : a.mae) - (b.mae == null ? 1e18 : b.mae); }).map(function (s) {
+      return '<li class="' + (s.id === res.best.id ? 'best' : '') + '"><span>' + s.name + (s.id === res.best.id ? ' (chosen)' : '') + '</span><span class="m">' + (s.mae == null ? 'n/a' : fmt(s.mae)) + '</span></li>'; }).join('') + '</ul></details>';
+    return h + '</article>';
+  }
+
+  function render() {
+    compute();
+    var n = state.months.length, last = state.months[n - 1], next = addMonths(last, 1);
+    var curT = 0, nextT = 0, parts = [];
+    state.bills.forEach(function (b, i) {
+      var c = b.values[n - 1]; curT += c; nextT += results[i].pred;
+      parts.push({ name: b.name, v: c, color: COLORS[i % COLORS.length] });
+    });
+    document.getElementById('period').textContent = longLabel(last) + ' → ' + longLabel(next);
+    document.getElementById('curLabel').textContent = longLabel(last) + ' bill';
+    document.getElementById('nextLabel').textContent = longLabel(next) + ', ML estimate';
+    document.getElementById('curTotal').textContent = fmt(curT);
+    document.getElementById('nextTotal').textContent = fmt(nextT);
+    document.getElementById('curNote').textContent = state.bills.length + (state.bills.length === 1 ? ' bill' : ' bills') + ' over ' + n + ' months of history.';
+    var diff = nextT - curT;
+    document.getElementById('nextNote').textContent = !state.bills.length ? '' : Math.abs(diff) < 0.005 ? 'Same as this month.' : fmt(Math.abs(diff)) + (diff > 0 ? ' more' : ' less') + ' than this month.';
+    document.getElementById('bar').innerHTML = parts.filter(function (p) { return p.v > 0; }).map(function (p) {
+      return '<span title="' + esc(p.name) + '" style="width:' + (curT ? p.v / curT * 100 : 0) + '%;background:' + p.color + '"></span>'; }).join('');
+    document.getElementById('legend').innerHTML = parts.map(function (p) {
+      return '<span><i style="background:' + p.color + '"></i>' + esc(p.name) + ' <b>' + fmt(p.v) + '</b></span>'; }).join('');
+    itemsEl.innerHTML = state.bills.length ? state.bills.map(card).join('') : '<div class="empty">No bills yet. Paste your monthly history below and press Apply.</div>';
+    document.getElementById('exTag').hidden = !state.example;
+    document.getElementById('addHelp').textContent = 'Enter what you actually paid for ' + longLabel(next) + ' once the bills arrive. The tool then predicts ' + longLabel(addMonths(next, 1)) + '.';
+    document.getElementById('addrow').innerHTML = state.bills.map(function (b, i) {
+      return '<label class="f" for="add-' + i + '">' + esc(b.name) + ' (₹)<input type="number" min="0" step="any" id="add-' + i + '" inputmode="decimal"></label>'; }).join('');
+    document.getElementById('csv').value = toCSV();
+    save();
+  }
+
+  function say(text, kind) {
+    var el = document.getElementById('msg'); el.textContent = text; el.className = 'msg' + (kind ? ' ' + kind : '');
+  }
+
+  itemsEl.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-del]'); if (!b) return;
+    state.bills.splice(+b.dataset.del, 1); state.example = false; say('', ''); render();
+  });
+  document.getElementById('addMonth').addEventListener('click', function () {
+    var vals = [];
+    for (var i = 0; i < state.bills.length; i++) {
+      var raw = document.getElementById('add-' + i).value, v = parseFloat(raw);
+      if (raw === '' || !isFinite(v) || v < 0) { say('Enter an amount for every bill. Use 0 if a bill did not come.', 'err'); return; }
+      vals.push(v);
+    }
+    if (!vals.length) { say('There are no bills to add to.', 'err'); return; }
+    state.months.push(addMonths(state.months[state.months.length - 1], 1));
+    state.bills.forEach(function (b, i) { b.values.push(vals[i]); });
+    state.example = false; render(); say('Month added. The estimate now looks one month further ahead.', 'ok');
+  });
+  document.getElementById('apply').addEventListener('click', function () {
+    try { state = parseCSV(document.getElementById('csv').value); }
+    catch (err) { say(err.message, 'err'); return; }
+    render(); say('Applied ' + state.months.length + ' months of data for ' + state.bills.length + ' bills.', 'ok');
+  });
+  document.getElementById('reset').addEventListener('click', function () { state = seedData(); render(); say('Example data restored.', 'ok'); });
+
+  render();
+})();
+</script>
+</body>
+</html>
