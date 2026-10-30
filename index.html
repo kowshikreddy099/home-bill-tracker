@@ -169,6 +169,7 @@ summary { cursor: pointer; }
   function shortLabel(s) { return MONTHS[parseYM(s).m].slice(0, 3); }
   function r2(n) { return Math.round(n * 100) / 100; }
   function mean(a) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i]; return a.length ? s / a.length : 0; }
+  function median(a) { var b = a.slice().sort(function (x, y) { return x - y; }), n = b.length, mid = Math.floor(n / 2); return n % 2 ? b[mid] : (b[mid - 1] + b[mid]) / 2; }
   function fmt(n) { return '₹' + (n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
@@ -275,6 +276,18 @@ summary { cursor: pointer; }
       return s;
     };
   }
+  function forecastUpperBound(y) {
+    /* A median/MAD bound ignores one unusually high bill but keeps room for
+       ordinary variation and seasonal changes. */
+    var recent = y.slice(Math.max(0, y.length - 6)), middle = median(recent);
+    var deviations = recent.map(function (v) { return Math.abs(v - middle); });
+    var spread = Math.max(Math.abs(middle) * 0.15, 1.4826 * median(deviations));
+    return Math.max(0, middle + 3 * spread);
+  }
+  function safeForecast(pred, y) {
+    if (!isFinite(pred)) pred = y[y.length - 1];
+    return Math.max(0, Math.min(pred, forecastUpperBound(y)));
+  }
   function predictWith(id, y, mos, t) {
     if (id === 'naive') return y[t - 1];
     if (id === 'ma3') return (y[t - 1] + y[t - 2] + y[t - 3]) / 3;
@@ -290,12 +303,15 @@ summary { cursor: pointer; }
     var start = full ? 3 + MIN_ROWS : 3, scores = [];
     ids.forEach(function (id) {
       var err = 0, cnt = 0;
-      for (var t = start; t < n; t++) { err += Math.abs(predictWith(id, y, mos, t) - y[t]); cnt++; }
+      for (var t = start; t < n; t++) {
+        /* Validate the same guarded result users receive, not an unbounded raw model output. */
+        err += Math.abs(safeForecast(predictWith(id, y, mos, t), y.slice(0, t)) - y[t]); cnt++;
+      }
       scores.push({ id: id, name: NAMES[id], mae: cnt ? err / cnt : null });
     });
     var best = scores[0];
     scores.forEach(function (s) { if (s.mae != null && (best.mae == null || s.mae < best.mae)) best = s; });
-    var pred = Math.max(0, predictWith(best.id, y, mos, n));
+    var pred = safeForecast(predictWith(best.id, y, mos, n), y);
     return { pred: r2(pred), best: best, scores: scores, ml: full };
   }
 

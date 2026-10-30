@@ -51,6 +51,33 @@ MODELS = {
 }
 
 
+def forecast_upper_bound(history: pd.Series) -> float:
+    """Return a conservative, outlier-resistant upper bound for one-month forecasts.
+
+    A single unusually large bill (for example, a repair included in an electricity
+    bill) should not make a recurring-bill estimate jump by the same amount. The
+    median and median absolute deviation (MAD) of the latest six observations are
+    robust to one such value, unlike a mean or maximum.
+    """
+    recent = history.dropna().to_numpy(dtype=float)[-6:]
+    if len(recent) == 0:
+        return 0.0
+
+    middle = float(np.median(recent))
+    mad = float(np.median(np.abs(recent - middle)))
+    # Leave room for normal month-to-month variation even when the recent bills
+    # are identical. Three robust standard deviations is deliberately generous.
+    spread = max(abs(middle) * 0.15, 1.4826 * mad)
+    return max(0.0, middle + 3 * spread)
+
+
+def safe_forecast(prediction: float, history: pd.Series) -> float:
+    """Keep forecasts finite, non-negative, and within the recent robust range."""
+    if not np.isfinite(prediction):
+        prediction = float(history.dropna().iloc[-1])
+    return float(np.clip(prediction, 0.0, forecast_upper_bound(history)))
+
+
 def walk_forward_mae(df: pd.DataFrame, make_model) -> float:
     errors = []
     for t in range(MIN_TRAIN, len(df)):
@@ -61,11 +88,25 @@ def walk_forward_mae(df: pd.DataFrame, make_model) -> float:
             model = make_model()
             model.fit(train[FEATURES], train["y"])
             pred = model.predict(test[FEATURES])[0]
+        # Score the same protected forecast that will be shown to the user.
+        # Otherwise an unbounded model can win validation but produce a
+        # disproportionately high final estimate.
+        pred = safe_forecast(float(pred), train["y"])
         errors.append(abs(pred - test["y"].iloc[0]))
     return float(np.mean(errors))
 
 
 def predict_next(series: pd.Series):
+    series = series.dropna()
+    if series.empty:
+        raise ValueError("At least one bill amount is required to make a forecast.")
+
+    # There are not enough complete lag rows to score a model until 16 months
+    # are present. Repeating the latest bill is transparent and reliable here.
+    if len(series) < MIN_TRAIN + 4:
+        name = "Naive (last month)"
+        return safe_forecast(float(series.iloc[-1]), series), name, {name: 0.0}
+
     # Add one empty future row so the same feature code builds next month's features.
     next_period = series.index[-1] + 1
     extended = pd.concat([series, pd.Series([np.nan], index=pd.PeriodIndex([next_period]))])
@@ -81,7 +122,7 @@ def predict_next(series: pd.Series):
         model = MODELS[best]()
         model.fit(hist[FEATURES], hist["y"])
         pred = float(model.predict(future[FEATURES])[0])
-    return pred, best, scores
+    return safe_forecast(pred, hist["y"]), best, scores
 
 
 def main(path: str):

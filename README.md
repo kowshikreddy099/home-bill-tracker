@@ -31,6 +31,8 @@ For every month, features are built from older months only:
 
 The models are checked with walk-forward validation. Starting from the 16th month, each model trains on all earlier months and predicts the next one. The average absolute error decides the winner for each bill. Fixed bills such as rent usually pick Repeat last month. Seasonal bills such as electricity usually pick Ridge regression.
 
+Forecasts are protected from one-off bill spikes. Before scoring or displaying a prediction, the tracker applies an outlier-resistant upper bound based on the median and typical variation of the latest six bills. This prevents an unusually large past bill from inflating the following month's estimate.
+
 ## Project structure
 
 ```
